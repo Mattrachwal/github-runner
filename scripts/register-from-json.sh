@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 source "$(dirname "$0")/_lib.sh"
 
+# Set FORCE_REREG=1 to force stop/remove/re-register existing instances
+FORCE_REREG="${FORCE_REREG:-0}"
+
 need_root
 have_cmd jq || apt-get install -y jq >/dev/null
 
@@ -34,6 +37,7 @@ for i in $(seq 0 $((COUNT-1))); do
     INST_NAME="${NAME}-${n}"
     RUN_DIR="/opt/actions-runner/${INST_NAME}"
     WORK_DIR="${WORK_BASE}-${n}"
+    UNIT="github-runner@${INST_NAME}.service"
 
     log "Configuring instance: $INST_NAME (scope: $SCOPE_URL, labels: $LABELS)"
     install -d -o github-runner -g github-runner -m 0750 "$RUN_DIR" "$WORK_DIR"
@@ -46,11 +50,25 @@ for i in $(seq 0 $((COUNT-1))); do
       tar -xzf "$TMP" -C "$RUN_DIR"
       chown -R github-runner:github-runner "$RUN_DIR"
       rm -f "$TMP"
-      # Install dependencies script as runner user
-      sudo -u github-runner bash -lc "cd '$RUN_DIR' && ./bin/installdependencies.sh"
     fi
 
-    # Configure instance if not already done
+    # Ensure dependencies (root). Use a marker to avoid re-running every time.
+    if [[ ! -f "${RUN_DIR}/.deps_installed" ]]; then
+      log "Installing runner OS dependencies for ${INST_NAME} (root)…"
+      bash -lc "cd '$RUN_DIR' && ./bin/installdependencies.sh"
+      touch "${RUN_DIR}/.deps_installed"
+      chown github-runner:github-runner "${RUN_DIR}/.deps_installed"
+    fi
+
+    # Force re-registration if requested
+    if [[ "$FORCE_REREG" == "1" && -f "${RUN_DIR}/.runner" ]]; then
+      log "FORCE_REREG=1: stopping and removing existing registration for ${INST_NAME}"
+      systemctl stop "$UNIT" || true
+      sudo -u github-runner bash -lc "cd '$RUN_DIR' && ./config.sh remove --unattended || true"
+      rm -f "${RUN_DIR}/.runner"
+    fi
+
+    # Configure instance if not already done (least privilege as github-runner)
     if [[ ! -f "${RUN_DIR}/.runner" ]]; then
       sudo -u github-runner bash -lc "cd '$RUN_DIR' && \
         ./config.sh --unattended \
@@ -61,8 +79,12 @@ for i in $(seq 0 $((COUNT-1))); do
           --work '$WORK_DIR'"
     fi
 
-    # Enable + start systemd service
-    systemctl enable --now "github-runner@${INST_NAME}.service"
+    # Enable + start systemd service (or restart if already enabled)
+    if systemctl is-enabled --quiet "$UNIT"; then
+      systemctl restart "$UNIT"
+    else
+      systemctl enable --now "$UNIT"
+    fi
   done
 done
 

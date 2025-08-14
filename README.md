@@ -141,6 +141,47 @@ This will:
 
 - Tokens: Registration tokens expire quickly (1 hour by default). Ensure you generate them right before running setup.
 
+## ⚠️ Security Warnings
+
+Self-hosted GitHub Actions runners **execute arbitrary code** from your workflows.  
+This means that **anyone with permission to modify or approve workflows in your repository or organization can run commands on the machine hosting your runner**.
+
+### Key Risks
+
+1. **Workflow Trust** – If a malicious workflow is merged into your repository, it can:
+
+   - Install backdoors or crypto-miners
+   - Steal secrets or credentials
+   - Modify or delete files on the host system
+
+2. **Secrets Exposure** – Any secrets configured in GitHub Actions can be accessed by jobs that run on this runner.  
+   Malicious jobs can print or exfiltrate them.
+
+3. **Docker Access Equals Root** – If Docker is installed and accessible to the runner user:
+
+   - Any job can mount the host filesystem
+   - Any job can start privileged containers and escalate to full root access
+
+4. **Network Access** – By default, runners can reach any host your network allows.
+
+   - This could include databases, internal services, or other sensitive systems
+
+5. **Persistent Services** – Long-lived runners keep their environment between jobs unless explicitly cleaned.  
+   Residual files, logs, or build artifacts can leak sensitive data.
+
+### Mitigation Recommendations
+
+While this setup script **does not** implement these measures automatically, you should strongly consider:
+
+- Restricting who can modify workflows (branch protection, required reviews)
+- Limiting Actions to trusted sources (GitHub → Settings → Actions → General)
+- Reducing `GITHUB_TOKEN` default permissions to **read-only**
+- Running runners on **isolated hosts or VMs** separate from production systems
+- Using ephemeral runners for untrusted workloads
+- Keeping host software up to date and applying standard Linux hardening (SSH restrictions, firewall rules, sysctl tuning)
+
+> **Bottom line:** If someone can change or approve workflows in your repo, they can control the machine running the runner. Treat the runner host as fully compromised whenever running untrusted code.
+
 ## License
 
 MIT
