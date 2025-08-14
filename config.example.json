@@ -1,0 +1,20 @@
+{
+  "runners": [
+    {
+      "name": "mini1-shared",
+      "scope_url": "https://github.com/your-org",
+      "registration_token": "REPLACE_WITH_TOKEN",
+      "labels": ["self-hosted", "linux", "x64", "mini-pc"],
+      "instances": 5,
+      "work_dir": "/var/lib/github-runner/mini1-shared"
+    },
+    {
+      "name": "repo-special",
+      "scope_url": "https://github.com/your-org/specific-repo",
+      "registration_token": "REPLACE_WITH_ANOTHER_TOKEN",
+      "labels": ["self-hosted", "linux", "special"],
+      "instances": 1,
+      "work_dir": "/var/lib/github-runner/repo-special"
+    }
+  ]
+}

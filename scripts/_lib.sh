@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+log()  { printf "[%(%F %T)T] %s\n" -1 "$*"; }
+die()  { printf "ERROR: %s\n" "$*" >&2; exit 1; }
+need_root() { [[ $EUID -eq 0 ]] || die "Run as root (sudo)."; }
+have_cmd()  { command -v "$1" >/dev/null 2>&1; }
+json() { jq -er "$2" "$1"; }
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CFG_PATH_LOCAL="$REPO_ROOT/config.json"
+CFG_PATH_ETC="/etc/github-runner/config.json"
+
+copy_config_if_present() {
+  if [[ -f "$CFG_PATH_LOCAL" ]]; then
+    mkdir -p /etc/github-runner
+    cp "$CFG_PATH_LOCAL" "$CFG_PATH_ETC"
+    chmod 0640 "$CFG_PATH_ETC"
+    chown root:root "$CFG_PATH_ETC"
+    log "Copied config.json to $CFG_PATH_ETC"
+  fi
+  [[ -f "$CFG_PATH_ETC" ]] || die "config.json not found. Put it in repo root or at $CFG_PATH_ETC"
+}
+
+ensure_base() {
+  apt-get update -y
+  apt-get upgrade -y
+  apt-get install -y \
+    curl ca-certificates jq tar xz-utils gzip coreutils \
+    apt-transport-https gnupg lsb-release \
+    build-essential unzip git \
+    ufw fail2ban unattended-upgrades
+
+  DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -plow unattended-upgrades || true
+
+  # Firewall baseline: allow SSH
+  ufw allow OpenSSH || true
+  ufw --force enable
+}
+
+ensure_docker_if_requested() {
+  # Install Docker if WITH_DOCKER=1 or --with-docker was passed to setup/install
+  local WANT="${WITH_DOCKER:-0}"
+  if [[ "$WANT" == "1" ]]; then
+    log "Installing Docker Engine (requested)"
+    if ! have_cmd docker; then
+      # Official repo install (Debian)
+      apt-get install -y ca-certificates curl gnupg
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update -y
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      systemctl enable --now docker
+    fi
+    docker --version || die "Docker installation failed."
+    log "Docker Engine is installed. Note: granting socket access grants root-equivalent power."
+  else
+    log "Skipping Docker Engine install (WITH_DOCKER=1 to enable)."
+  fi
+}
+
+ensure_user_dirs() {
+  id -u github-runner &>/dev/null || useradd -r -m -s /usr/sbin/nologin github-runner
+  install -d -o github-runner -g github-runner -m 0750 /opt/actions-runner
+  install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner
+}
+
+install_unit_and_override() {
+  install -D -m 0644 "$REPO_ROOT/config/systemd/github-runner@.service" \
+    /etc/systemd/system/github-runner@.service
+  install -D -m 0644 "$REPO_ROOT/config/systemd/override.conf" \
+    /etc/systemd/system/github-runner@.service.d/override.conf
+  systemctl daemon-reload
+}
+
+latest_runner_url() {
+  # Get latest Linux x64 runner archive URL (no network if GH blocks API; retry-friendly)
+  local api="https://api.github.com/repos/actions/runner/releases/latest"
+  curl -fsSL "$api" \
+    | jq -r '.assets[] | select(.name | test("linux-x64.*\\.tar\\.gz$")) | .browser_download_url' \
+    | head -n1
+}
+
+mask_token() {
+  sed -E 's/("registration_token":\s*")[^"]+/\1********/g'
+}
