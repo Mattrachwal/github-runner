@@ -60,18 +60,61 @@ ensure_extracted() {
   [[ -x "$RUN_DIR/bin/installdependencies.sh" ]] || die "Extraction failed: missing $RUN_DIR/bin/installdependencies.sh"
 }
 
+need_runtime_libs() {
+  # Return 0 (true) if any required runtime libs are missing.
+  # Checks are intentionally broad across Debian 12/13 names.
+  local missing=0
+  local have_icu=0
+  if ldconfig -p | grep -qiE 'libicu(uc|i18n)'; then have_icu=1; fi
+
+  local have_ssl=0
+  if ldconfig -p | grep -qiE 'libssl\.so\.3'; then have_ssl=1; fi
+
+  local have_zlib=0
+  if ldconfig -p | grep -qiE 'libz\.so\.'; then have_zlib=1; fi
+
+  local have_krb5=0
+  if ldconfig -p | grep -qiE 'libkrb5\.so\.'; then have_krb5=1; fi
+
+  (( have_icu && have_ssl && have_zlib && have_krb5 )) || return 0
+  return 1
+}
+
 install_runner_deps_if_needed() {
   # args: RUN_DIR INST_NAME
   local RUN_DIR="$1" INST_NAME="$2" MARK="$RUN_DIR/.deps_installed"
-  if [[ -f "$MARK" ]]; then
+
+  # If marker exists but libs are missing (e.g., partial/failed prior run), force reinstall.
+  if [[ -f "$MARK" ]] && need_runtime_libs; then
+    log "Deps marker exists but required libs missing for $INST_NAME — re-installing…"
+    rm -f "$MARK"
+  fi
+
+  # If everything already present and marker exists, skip.
+  if [[ -f "$MARK" ]] && ! need_runtime_libs; then
     return 0
   fi
+
   log "Installing OS deps for $INST_NAME (root)…"
+  # Run GitHub’s helper (handles dotnet/icu pre-reqs for the runner)
   bash -lc "cd '$RUN_DIR' && ./bin/installdependencies.sh" || true
 
-  # On Debian 13 (trixie) ICU may still be needed explicitly (rare), add common libs:
+  # Refresh APT and install the usual suspects.
   apt-get update -y || true
-  apt-get install -y libicu-dev libicu74 libssl3 zlib1g libkrb5-3 curl || true
+
+  # Figure out the best libicu package available on this host (Debian 12=72, Debian 13=74, etc.)
+  ICU_PKG="$(apt-cache search -n '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n1 || true)"
+  if [[ -z "$ICU_PKG" ]]; then
+    # Fallback to dev package if no versioned runtime found in cache
+    ICU_PKG="libicu-dev"
+  fi
+
+  apt-get install -y "$ICU_PKG" libssl3 zlib1g libkrb5-3 curl || true
+
+  # Final verification — only stamp the marker if libs are now present.
+  if need_runtime_libs; then
+    die "Required runtime libraries still missing after install for $INST_NAME. Check APT output above."
+  fi
 
   touch "$MARK"
   chown github-runner:github-runner "$MARK"
