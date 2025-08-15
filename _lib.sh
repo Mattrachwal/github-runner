@@ -74,8 +74,12 @@ ensure_user_dirs() {
 }
 
 install_unit_and_override() {
-  # Base unit - ensure no HOME is set here
-  if [[ ! -f /etc/systemd/system/github-runner@.service ]]; then
+  # Install the base unit from config file
+  if [[ -f "$REPO_ROOT/config/systemd/github-runner@.service" ]]; then
+    install -m 0644 "$REPO_ROOT/config/systemd/github-runner@.service" /etc/systemd/system/
+    log "Installed base unit from config/systemd/github-runner@.service"
+  else
+    # Fallback: create base unit
     tee /etc/systemd/system/github-runner@.service >/dev/null <<'UNIT'
 [Unit]
 Description=GitHub Actions Runner %i
@@ -86,6 +90,7 @@ After=network-online.target
 User=github-runner
 Group=github-runner
 WorkingDirectory=/opt/actions-runner/%i
+ExecStart=/bin/bash -lc 'cd /opt/actions-runner/%i && ./run.sh --startuptype service'
 KillMode=process
 Restart=always
 RestartSec=5
@@ -106,36 +111,50 @@ AmbientCapabilities=
 [Install]
 WantedBy=multi-user.target
 UNIT
+    log "Created fallback base unit"
   fi
 
   systemctl daemon-reload
 }
 
 write_home_override_isolated() {
-  # Create a drop-in that ensures the per-instance HOME exists, loads it,
-  # and then *exports HOME* in ExecStart before launching run.sh.
+  # Install the override from config file or create one
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
-  cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
-[Service]
-# Ensure per-instance HOME dir exists (runs as root even though User=github-runner)
-ExecStartPre=/usr/bin/install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner/%i
+  
+  if [[ -f "$REPO_ROOT/config/systemd/override.conf" ]]; then
+    # Use the config file but ensure it has the critical ExecStart fix
+    cp "$REPO_ROOT/config/systemd/override.conf" /etc/systemd/system/github-runner@.service.d/override.conf
+    
+    # Check if the override.conf clears ExecStart (critical for HOME to work)
+    if ! grep -q "ExecStart=$" /etc/systemd/system/github-runner@.service.d/override.conf; then
+      log "WARNING: override.conf doesn't clear ExecStart. Adding fix..."
+      # Add the ExecStart fix to the existing override
+      cat >> /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 
-# Set HOME directly in systemd environment - this overrides systemd's default
-Environment=HOME=/var/lib/github-runner/%i
-Environment=USER=github-runner
-Environment=LOGNAME=github-runner
-Environment=XDG_CONFIG_HOME=/var/lib/github-runner/%i/.config
-Environment=XDG_DATA_HOME=/var/lib/github-runner/%i/.local/share
-Environment=XDG_CACHE_HOME=/var/lib/github-runner/%i/.cache
-
-# Block reading any global git config to prevent permission issues
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
-
-# Clear base ExecStart and replace - HOME should already be set by Environment above
+# CRITICAL FIX: Clear and replace ExecStart to remove -l flag
 ExecStart=
 ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 EOF
+    fi
+    log "Installed override from config/systemd/override.conf (with fix applied)"
+  else
+    # Create override from scratch
+    cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
+[Service]
+# Set per-instance HOME environment
+Environment=HOME=/var/lib/github-runner/%i
+Environment=USER=github-runner
+Environment=LOGNAME=github-runner
+Environment=GIT_CONFIG_GLOBAL=/dev/null
+Environment=GIT_CONFIG_SYSTEM=/dev/null
+
+# Clear base ExecStart and replace without -l flag
+ExecStart=
+ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
+EOF
+    log "Created override.conf from scratch"
+  fi
+  
   systemctl daemon-reload
   log "Installed per-instance HOME drop-in (override.conf)."
 }
