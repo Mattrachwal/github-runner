@@ -1,33 +1,32 @@
 [Unit]
 Description=GitHub Actions Runner %i
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=github-runner
 Group=github-runner
 WorkingDirectory=/opt/actions-runner/%i
-ExecStart=/opt/actions-runner/%i/runsvc.sh
+
+# Call run.sh directly via bash (works even on noexec mounts)
+ExecStart=/bin/bash -lc 'cd /opt/actions-runner/%i && ./run.sh --startuptype service'
+
 KillMode=process
 Restart=always
 RestartSec=5
 
-# Security hardening (baseline)
+# Baseline hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
-PrivateDevices=yes
-ProtectSystem=strict
-ProtectHome=true
+ProtectSystem=full
+ProtectHome=yes
 ProtectControlGroups=yes
-ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectKernelLogs=yes
+ProtectKernelTunables=yes
 LockPersonality=yes
 RestrictSUIDSGID=yes
-SystemCallFilter=@system-service
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
-ReadWritePaths=/opt/actions-runner/%i
-ReadWritePaths=/var/lib/github-runner/%i
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target

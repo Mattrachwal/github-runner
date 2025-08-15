@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source "$(dirname "$0")/_lib.sh"
+source "$(dirname "$0")/../_lib.sh"
 
 # Flags:
-#   WITH_DOCKER=1   -> install Docker Engine too
-# Usage:
-#   sudo WITH_DOCKER=1 ./scripts/install.sh
-# or
-#   sudo ./scripts/install.sh
+#   WITH_DOCKER=1 -> install Docker Engine too
 
 need_root
 copy_config_if_present

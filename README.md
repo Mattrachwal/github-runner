@@ -185,3 +185,19 @@ While this setup script **does not** implement these measures automatically, you
 ## License
 
 MIT
+
+# Fresh install (with Docker) + register + harden
+
+sudo WITH_DOCKER=1 ./scripts/setup.sh
+
+# Re-register everything if needed
+
+sudo FORCE_REREG=1 ./scripts/register-from-json.sh
+
+# Update runner binaries in place later
+
+sudo ./scripts/update.sh
+
+# Uninstall everything (keep user/config if you want)
+
+sudo KEEP_USER=1 LEAVE_CONFIG=1 ./scripts/uninstall.sh
