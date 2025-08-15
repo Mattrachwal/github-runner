@@ -126,20 +126,22 @@ write_home_override_isolated() {
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
   cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 [Service]
-PermissionsStartOnly=true
+# Clear any existing environment from systemd defaults
+Environment=
 
 # Ensure per-instance HOME dir exists (runs as root even though User=github-runner)
 ExecStartPre=/usr/bin/install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner/%i
 
-# Load HOME from /etc/default/github-runner/home-%i (written by installer)
-EnvironmentFile=-/etc/default/github-runner/home-%i
+# Load HOME from environment file
+EnvironmentFile=/etc/default/github-runner/home-%i
 
-# Optional: block reading any global git config
+# Block reading any global git config to prevent permission issues
 Environment=GIT_CONFIG_GLOBAL=/dev/null
+Environment=GIT_CONFIG_SYSTEM=/dev/null
 
-# Clear base ExecStart and replace with one that exports HOME explicitly
+# Clear base ExecStart and replace with one that explicitly sets HOME
 ExecStart=
-ExecStart=/bin/bash -lc 'export HOME="${HOME:-/var/lib/github-runner/%i}"; cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
+ExecStart=/bin/bash -c 'export HOME="/var/lib/github-runner/%i"; export USER="github-runner"; export LOGNAME="github-runner"; cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 EOF
   systemctl daemon-reload
   log "Installed per-instance HOME drop-in (override.conf)."
@@ -160,13 +162,37 @@ ensure_instance_home_envs() {
       inst="${name}-${n}"
       homedir="/var/lib/github-runner/${inst}"
       envfile="/etc/default/github-runner/home-${inst}"
+      
+      # Ensure the home directory exists with correct permissions
       install -d -o github-runner -g github-runner -m 0750 "$homedir"
-      printf 'HOME=%s\n' "$homedir" > "$envfile"
+      
+      # Create a basic .gitconfig to prevent access issues
+      gitconfig="$homedir/.gitconfig"
+      if [[ ! -f "$gitconfig" ]]; then
+        cat > "$gitconfig" <<'GITCONFIG'
+[user]
+	name = GitHub Runner
+	email = runner@localhost
+[safe]
+	directory = *
+[init]
+	defaultBranch = main
+GITCONFIG
+        chown github-runner:github-runner "$gitconfig"
+        chmod 0644 "$gitconfig"
+      fi
+      
+      # Write environment file
+      cat > "$envfile" <<EOF
+HOME=/var/lib/github-runner/${inst}
+USER=github-runner
+LOGNAME=github-runner
+EOF
       chmod 0644 "$envfile"
     done
   done
 
-  log "Ensured HOME dirs and env files for all instances."
+  log "Ensured HOME dirs, .gitconfig files, and env files for all instances."
 }
 
 assert_unit_execstart_uses_runsh() {
