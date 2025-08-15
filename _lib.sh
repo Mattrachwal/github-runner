@@ -74,7 +74,7 @@ ensure_user_dirs() {
 }
 
 install_unit_and_override() {
-  # Base unit (no ExecStart here; we force it via drop-in)
+  # Base unit - ensure no HOME is set here
   if [[ ! -f /etc/systemd/system/github-runner@.service ]]; then
     tee /etc/systemd/system/github-runner@.service >/dev/null <<'UNIT'
 [Unit]
@@ -108,15 +108,6 @@ WantedBy=multi-user.target
 UNIT
   fi
 
-  # Drop-in override: noexec-safe ExecStart that runs run.sh via bash
-  install -d -m 0755 /etc/systemd/system/github-runner@.service.d
-  tee /etc/systemd/system/github-runner@.service.d/override.conf >/dev/null <<'OVERRIDE'
-[Service]
-WorkingDirectory=/opt/actions-runner/%i
-ExecStart=
-ExecStart=/bin/bash -lc 'cd /opt/actions-runner/%i && exec /bin/bash run.sh --startuptype service'
-OVERRIDE
-
   systemctl daemon-reload
 }
 
@@ -126,34 +117,34 @@ write_home_override_isolated() {
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
   cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 [Service]
-# Clear any existing environment from systemd defaults
-Environment=
-
 # Ensure per-instance HOME dir exists (runs as root even though User=github-runner)
 ExecStartPre=/usr/bin/install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner/%i
 
-# Load HOME from environment file
-EnvironmentFile=/etc/default/github-runner/home-%i
+# Set HOME directly in systemd environment - this overrides systemd's default
+Environment=HOME=/var/lib/github-runner/%i
+Environment=USER=github-runner
+Environment=LOGNAME=github-runner
+Environment=XDG_CONFIG_HOME=/var/lib/github-runner/%i/.config
+Environment=XDG_DATA_HOME=/var/lib/github-runner/%i/.local/share
+Environment=XDG_CACHE_HOME=/var/lib/github-runner/%i/.cache
 
 # Block reading any global git config to prevent permission issues
 Environment=GIT_CONFIG_GLOBAL=/dev/null
 Environment=GIT_CONFIG_SYSTEM=/dev/null
 
-# Clear base ExecStart and replace with one that explicitly sets HOME
+# Clear base ExecStart and replace - HOME should already be set by Environment above
 ExecStart=
-ExecStart=/bin/bash -c 'export HOME="/var/lib/github-runner/%i"; export USER="github-runner"; export LOGNAME="github-runner"; cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
+ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 EOF
   systemctl daemon-reload
   log "Installed per-instance HOME drop-in (override.conf)."
 }
 
 ensure_instance_home_envs() {
-  # Create /etc/default/github-runner/home-<instance> files and ensure dirs exist
+  # Create home directories and ensure they have proper setup
   have_cmd jq || apt-get update -y >/dev/null 2>&1 || true
   have_cmd jq || apt-get install -y jq >/dev/null 2>&1 || true
   [[ -f "$CFG_PATH_ETC" ]] || die "config.json not found at $CFG_PATH_ETC"
-
-  install -d -m 0755 /etc/default/github-runner
 
   jq -r '.runners[] | "\(.name)\t\(.instances)"' "$CFG_PATH_ETC" | \
   while IFS=$'\t' read -r name count; do
@@ -161,10 +152,15 @@ ensure_instance_home_envs() {
     for n in $(seq 1 "$count"); do
       inst="${name}-${n}"
       homedir="/var/lib/github-runner/${inst}"
-      envfile="/etc/default/github-runner/home-${inst}"
       
       # Ensure the home directory exists with correct permissions
       install -d -o github-runner -g github-runner -m 0750 "$homedir"
+      
+      # Create XDG directories
+      install -d -o github-runner -g github-runner -m 0750 "$homedir/.config"
+      install -d -o github-runner -g github-runner -m 0750 "$homedir/.local"
+      install -d -o github-runner -g github-runner -m 0750 "$homedir/.local/share"
+      install -d -o github-runner -g github-runner -m 0750 "$homedir/.cache"
       
       # Create a basic .gitconfig to prevent access issues
       gitconfig="$homedir/.gitconfig"
@@ -177,22 +173,37 @@ ensure_instance_home_envs() {
 	directory = *
 [init]
 	defaultBranch = main
+[core]
+	autocrlf = input
 GITCONFIG
         chown github-runner:github-runner "$gitconfig"
         chmod 0644 "$gitconfig"
       fi
       
-      # Write environment file
-      cat > "$envfile" <<EOF
-HOME=/var/lib/github-runner/${inst}
-USER=github-runner
-LOGNAME=github-runner
+      # Create a .bashrc that reinforces the HOME setting
+      bashrc="$homedir/.bashrc"
+      if [[ ! -f "$bashrc" ]]; then
+        cat > "$bashrc" <<EOF
+# GitHub Runner .bashrc
+export HOME="$homedir"
+export USER="github-runner"
+export LOGNAME="github-runner"
+export XDG_CONFIG_HOME="$homedir/.config"
+export XDG_DATA_HOME="$homedir/.local/share"
+export XDG_CACHE_HOME="$homedir/.cache"
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+
+# Add common paths
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EOF
-      chmod 0644 "$envfile"
+        chown github-runner:github-runner "$bashrc"
+        chmod 0644 "$bashrc"
+      fi
     done
   done
 
-  log "Ensured HOME dirs, .gitconfig files, and env files for all instances."
+  log "Ensured HOME dirs, XDG dirs, .gitconfig, and .bashrc files for all instances."
 }
 
 assert_unit_execstart_uses_runsh() {
