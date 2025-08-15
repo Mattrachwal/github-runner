@@ -121,49 +121,52 @@ OVERRIDE
 }
 
 write_home_override_isolated() {
-  # Overwrite the drop-in to use per-instance env files
+  # Create a drop-in that ensures the per-instance HOME exists, loads it,
+  # and then *exports HOME* in ExecStart before launching run.sh.
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
   cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 [Service]
-# Run ExecStartPre as root even though User=github-runner
 PermissionsStartOnly=true
 
-# Ensure per-instance HOME dir exists before the runner starts
+# Ensure per-instance HOME dir exists (runs as root even though User=github-runner)
 ExecStartPre=/usr/bin/install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner/%i
 
-# Load HOME from a per-instance file: /etc/default/github-runner/home-<instance>
+# Load HOME from /etc/default/github-runner/home-%i (written by installer)
 EnvironmentFile=-/etc/default/github-runner/home-%i
 
-# Optional: avoid surprises from global git config
+# Optional: block reading any global git config
 Environment=GIT_CONFIG_GLOBAL=/dev/null
+
+# Clear base ExecStart and replace with one that exports HOME explicitly
+ExecStart=
+ExecStart=/bin/bash -lc 'export HOME="${HOME:-/var/lib/github-runner/%i}"; cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 EOF
   systemctl daemon-reload
-  log "Installed per-instance HOME drop-in override."
+  log "Installed per-instance HOME drop-in (override.conf)."
 }
 
-ensure_instance_home_dirs() {
-  # Requires $CFG_PATH_ETC and jq
+ensure_instance_home_envs() {
+  # Create /etc/default/github-runner/home-<instance> files and ensure dirs exist
   have_cmd jq || apt-get update -y >/dev/null 2>&1 || true
   have_cmd jq || apt-get install -y jq >/dev/null 2>&1 || true
   [[ -f "$CFG_PATH_ETC" ]] || die "config.json not found at $CFG_PATH_ETC"
 
   install -d -m 0755 /etc/default/github-runner
 
-  # For each runner name and its instance count, create dirs and env files
-  jq -r '.runners[] | "\(.name)\t\(.instances)"' "$CFG_PATH_ETC" | while IFS=$'\t' read -r name count; do
+  jq -r '.runners[] | "\(.name)\t\(.instances)"' "$CFG_PATH_ETC" | \
+  while IFS=$'\t' read -r name count; do
     [[ -n "$name" && "$count" =~ ^[0-9]+$ ]] || continue
     for n in $(seq 1 "$count"); do
       inst="${name}-${n}"
       homedir="/var/lib/github-runner/${inst}"
       envfile="/etc/default/github-runner/home-${inst}"
-
       install -d -o github-runner -g github-runner -m 0750 "$homedir"
       printf 'HOME=%s\n' "$homedir" > "$envfile"
       chmod 0644 "$envfile"
     done
   done
 
-  log "Ensured per-instance HOME dirs and env files under /var/lib/github-runner/* and /etc/default/github-runner/home-*."
+  log "Ensured HOME dirs and env files for all instances."
 }
 
 assert_unit_execstart_uses_runsh() {
