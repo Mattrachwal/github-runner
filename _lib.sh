@@ -120,6 +120,39 @@ OVERRIDE
   systemctl daemon-reload
 }
 
+# --- systemd HOME override for runners ---
+write_home_override() {
+  # Create/overwrite a drop-in that sets HOME away from /home
+  install -d -m 0755 /etc/systemd/system/github-runner@.service.d
+  cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
+[Service]
+# Keep WorkingDirectory as-is in the base unit (/opt/actions-runner/%i).
+# Just move HOME so ProtectHome=yes won't block ~/.gitconfig probes.
+Environment=HOME=/var/lib/github-runner/%i
+# Optional: avoid reading any global git config
+Environment=GIT_CONFIG_GLOBAL=/dev/null
+EOF
+  systemctl daemon-reload
+  log "Installed systemd drop-in override for HOME."
+}
+
+ensure_instance_home_dirs() {
+  # Create per-instance HOME dirs under /var/lib/github-runner/<name>-<n>
+  # Requires $CFG_PATH_ETC and jq
+  have_cmd jq || apt-get update -y >/dev/null 2>&1 || true
+  have_cmd jq || apt-get install -y jq >/dev/null 2>&1 || true
+  [[ -f "$CFG_PATH_ETC" ]] || die "config.json not found at $CFG_PATH_ETC"
+
+  while IFS=$'\t' read -r name count; do
+    [[ -n "$name" && "$count" =~ ^[0-9]+$ ]] || continue
+    for n in $(seq 1 "$count"); do
+      install -d -o github-runner -g github-runner -m 0750 "/var/lib/github-runner/${name}-${n}"
+    done
+  done < <(jq -r '.runners[] | "\(.name)\t\(.instances)"' "$CFG_PATH_ETC")
+
+  log "Ensured per-instance HOME dirs exist under /var/lib/github-runner/*."
+}
+
 assert_unit_execstart_uses_runsh() {
   local unit="github-runner@.service"
   if ! systemctl cat "$unit" 2>/dev/null \
