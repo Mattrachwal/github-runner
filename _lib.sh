@@ -141,7 +141,7 @@ EOF
   log "Installed per-instance HOME drop-in override."
 }
 
-ensure_instance_home_envs() {
+ensure_instance_home_dirs() {
   # Requires $CFG_PATH_ETC and jq
   have_cmd jq || apt-get update -y >/dev/null 2>&1 || true
   have_cmd jq || apt-get install -y jq >/dev/null 2>&1 || true
