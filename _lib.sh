@@ -71,6 +71,12 @@ ensure_user_dirs() {
   fi
   install -d -o github-runner -g github-runner -m 0750 /opt/actions-runner
   install -d -o github-runner -g github-runner -m 0750 /var/lib/github-runner
+  
+  # Add to docker group if Docker is installed and requested
+  if [[ "${WITH_DOCKER:-0}" == "1" ]] && getent group docker >/dev/null 2>&1; then
+    log "Adding github-runner to docker group (grants root-equivalent access via Docker socket)"
+    usermod -aG docker github-runner
+  fi
 }
 
 install_unit_and_override() {
