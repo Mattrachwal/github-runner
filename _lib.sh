@@ -96,7 +96,7 @@ After=network-online.target
 User=github-runner
 Group=github-runner
 WorkingDirectory=/opt/actions-runner/%i
-ExecStart=/bin/bash -lc 'cd /opt/actions-runner/%i && ./run.sh --startuptype service'
+ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 KillMode=process
 Restart=always
 RestartSec=5
@@ -127,44 +127,44 @@ write_home_override_isolated() {
   # Install the override from config file or create one
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
   
-  if [[ -f "$REPO_ROOT/config/systemd/override.conf" ]]; then
-    # Use the config file but ensure it has the critical ExecStart fix
-    cp "$REPO_ROOT/config/systemd/override.conf" /etc/systemd/system/github-runner@.service.d/override.conf
-    
-    # Check if the override.conf clears ExecStart (critical for HOME to work)
-    if ! grep -q "ExecStart=$" /etc/systemd/system/github-runner@.service.d/override.conf; then
-      log "WARNING: override.conf doesn't clear ExecStart. Adding fix..."
-      # Add the ExecStart fix to the existing override
-      cat >> /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
-
-# CRITICAL FIX: Clear and replace ExecStart to remove -l flag
-ExecStart=
-ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
-EOF
-    fi
-    log "Installed override from config/systemd/override.conf (with fix applied)"
-  else
-    # Create override from scratch
-    cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
+  # Always create a proper override with all necessary environment variables
+  cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 [Service]
 # Set per-instance HOME environment
 Environment=HOME=/var/lib/github-runner/%i
 Environment=USER=github-runner
 Environment=LOGNAME=github-runner
 
-# Actions tool + temp (fixes setup-node v22 caching/extraction stalls)
+# CRITICAL: Actions tool cache and temp directories
+# These are required for setup-* actions to work properly
 Environment=RUNNER_TOOL_CACHE=/opt/actions/_tool
-Environment=RUNNER_TEMP=/opt/actions/_temp
+Environment=RUNNER_TEMP=/var/lib/github-runner/%i/_temp
+Environment=AGENT_TOOLSDIRECTORY=/opt/actions/_tool
 
-# Clear base ExecStart and replace without -l flag
+# Working directory
+WorkingDirectory=/opt/actions-runner/%i
+
+# Prevent git config conflicts
+Environment=GIT_CONFIG_GLOBAL=/dev/null
+Environment=GIT_CONFIG_SYSTEM=/dev/null
+
+# CRITICAL FIX: Clear and replace ExecStart to remove -l flag
+# The -l flag causes login shell behavior which can override our environment
 ExecStart=
 ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
+
+# Timeouts to prevent hanging
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# Optional resource limits (uncomment if needed)
+# MemoryMax=4G
+# CPUQuota=80%
+# TasksMax=1000
 EOF
-    log "Created override.conf from scratch"
-  fi
   
   systemctl daemon-reload
-  log "Installed per-instance HOME drop-in (override.conf)."
+  log "Installed per-instance HOME drop-in (override.conf) with proper environment."
 }
 
 ensure_instance_home_envs() {
@@ -182,6 +182,10 @@ ensure_instance_home_envs() {
       
       # Ensure the home directory exists with correct permissions
       install -d -o github-runner -g github-runner -m 0750 "$homedir"
+      
+      # CRITICAL: Create _temp and _work directories for the runner
+      install -d -o github-runner -g github-runner -m 0755 "$homedir/_temp"
+      install -d -o github-runner -g github-runner -m 0755 "$homedir/_work"
       
       # Create XDG directories
       install -d -o github-runner -g github-runner -m 0750 "$homedir/.config"
@@ -230,7 +234,7 @@ EOF
     done
   done
 
-  log "Ensured HOME dirs, XDG dirs, .gitconfig, and .bashrc files for all instances."
+  log "Ensured HOME dirs, _temp, _work, XDG dirs, .gitconfig, and .bashrc files for all instances."
 }
 
 assert_unit_execstart_uses_runsh() {
@@ -242,14 +246,18 @@ assert_unit_execstart_uses_runsh() {
 }
 
 ensure_toolcache_dirs() {
-  # Centralized tool + temp for Actions setup-* tools (e.g., setup-node)
+  # Centralized tool + temp for Actions setup-* tools
   install -d -m 0775 -o github-runner -g github-runner /opt/actions/_tool
   install -d -m 0775 -o github-runner -g github-runner /opt/actions/_temp
 
-  # Basic sanity: warn if mount is noexec which can break Node binaries
+  # Basic sanity: warn if mount is noexec which can break tool binaries
   if mount | grep -qE "/opt/actions.*noexec"; then
     log "WARNING: /opt/actions is mounted with 'noexec'. This may break tool installs."
   fi
+  
+  # Ensure proper permissions
+  chown -R github-runner:github-runner /opt/actions/_tool 2>/dev/null || true
+  chown -R github-runner:github-runner /opt/actions/_temp 2>/dev/null || true
 }
 
 latest_runner_url() {
@@ -262,26 +270,4 @@ latest_runner_url() {
 
 mask_token() {
   sed -E 's/("registration_token":\s*")[^"]+/\1********/g'
-}
-
-# Remove Later
-toolcache_doctor() {
-  # Fall back to our standard paths if the env vars aren’t present
-  local tc="${RUNNER_TOOL_CACHE:-/opt/actions/_tool}"
-  local tt="${RUNNER_TEMP:-/opt/actions/_temp}"
-
-  log "Toolcache: $tc | Temp: $tt"
-
-  # Existence + writability checks
-  [[ -d "$tc" ]] || die "$tc does not exist"
-  [[ -d "$tt" ]] || die "$tt does not exist"
-  [[ -w "$tc" ]] || die "$tc not writable"
-  [[ -w "$tt" ]] || die "$tt not writable"
-
-  # Nice-to-have diagnostics
-  mount | grep -E "(/opt/actions|_work|_tool|_temp)" || true
-  df -h "$tc" "$tt" || true
-  if mount | grep -qE "/opt/actions.*\bnoexec\b"; then
-    log "WARNING: /opt/actions is mounted with 'noexec' — setup-node may fail."
-  fi
 }

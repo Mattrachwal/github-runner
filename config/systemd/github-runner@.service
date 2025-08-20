@@ -8,8 +8,8 @@ User=github-runner
 Group=github-runner
 WorkingDirectory=/opt/actions-runner/%i
 
-# Call run.sh directly via bash (works even on noexec mounts)
-ExecStart=/bin/bash -lc 'cd /opt/actions-runner/%i && ./run.sh --startuptype service'
+# CRITICAL: Use exec without -l flag to prevent environment override
+ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 
 KillMode=process
 Restart=always

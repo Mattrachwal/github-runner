@@ -67,7 +67,7 @@ install_runner_deps_if_needed() {
   if [[ -f "$MARK" ]] && ! need_runtime_libs; then return 0; fi
 
   log "Installing OS deps for $INST_NAME (root)…"
-  bash -lc "cd '$RUN_DIR' && ./bin/installdependencies.sh" || true
+  bash -c "cd '$RUN_DIR' && ./bin/installdependencies.sh" || true
   apt-get update -y || true
 
   # Pick best ICU runtime available (Debian 12=72, Debian 13=74, etc.)
@@ -91,7 +91,7 @@ remove_registration_if_present() {
   if [[ -f "$RUN_DIR/.runner" ]]; then
     log "Stopping unit and removing existing registration for $INST_NAME…"
     systemctl stop "$UNIT" || true
-    sudo -u github-runner bash -lc "cd '$RUN_DIR' && ./config.sh remove --unattended || true"
+    sudo -u github-runner bash -c "cd '$RUN_DIR' && ./config.sh remove --unattended || true"
     rm -f "$RUN_DIR/.runner"
   fi
 }
@@ -100,7 +100,7 @@ register_instance() {
   # args: RUN_DIR WORK_DIR SCOPE_URL TOKEN LABELS INST_NAME
   local RUN_DIR="$1" WORK_DIR="$2" SCOPE_URL="$3" TOKEN="$4" LABELS="$5" INST_NAME="$6"
   install -d -o github-runner -g github-runner -m 0750 "$WORK_DIR"
-  sudo -u github-runner bash -lc "cd '$RUN_DIR' && \
+  sudo -u github-runner bash -c "cd '$RUN_DIR' && \
     ./config.sh --unattended \
       --url '$SCOPE_URL' \
       --token '$TOKEN' \
@@ -144,10 +144,18 @@ for i in $(seq 0 $((COUNT-1))); do
     RUN_DIR="/opt/actions-runner/${INST_NAME}"
     WORK_DIR="${WORK_BASE}-${n}"
     UNIT="github-runner@${INST_NAME}.service"
+    HOME_DIR="/var/lib/github-runner/${INST_NAME}"
 
     log "Configuring instance: $INST_NAME (scope: $SCOPE_URL, labels: $LABELS)"
-    install -d -o github-runner -g github-runner -m 0750 "$RUN_DIR" "$WORK_DIR"
-    install -d -o github-runner -g github-runner -m 0750 "/var/lib/github-runner/${INST_NAME}"
+    
+    # Create all necessary directories
+    install -d -o github-runner -g github-runner -m 0750 "$RUN_DIR"
+    install -d -o github-runner -g github-runner -m 0750 "$WORK_DIR"
+    install -d -o github-runner -g github-runner -m 0750 "$HOME_DIR"
+    
+    # CRITICAL: Create _temp and _work directories in the home directory
+    install -d -o github-runner -g github-runner -m 0755 "$HOME_DIR/_temp"
+    install -d -o github-runner -g github-runner -m 0755 "$HOME_DIR/_work"
 
     ensure_extracted "$RUN_DIR" "$ARCHIVE_URL" "$INST_NAME"
     install_runner_deps_if_needed "$RUN_DIR" "$INST_NAME"

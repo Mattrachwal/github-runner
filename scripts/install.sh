@@ -15,6 +15,5 @@ ensure_toolcache_dirs
 install_unit_and_override
 write_home_override_isolated
 ensure_instance_home_envs
-toolcache_doctor
 
 log "Install complete. Next: register runner instances with ./scripts/register-from-json.sh"
