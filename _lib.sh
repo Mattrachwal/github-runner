@@ -152,6 +152,10 @@ Environment=HOME=/var/lib/github-runner/%i
 Environment=USER=github-runner
 Environment=LOGNAME=github-runner
 
+# Actions tool + temp (fixes setup-node v22 caching/extraction stalls)
+Environment=RUNNER_TOOL_CACHE=/opt/actions/_tool
+Environment=RUNNER_TEMP=/opt/actions/_temp
+
 # Clear base ExecStart and replace without -l flag
 ExecStart=
 ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
@@ -237,6 +241,17 @@ assert_unit_execstart_uses_runsh() {
   fi
 }
 
+ensure_toolcache_dirs() {
+  # Centralized tool + temp for Actions setup-* tools (e.g., setup-node)
+  install -d -m 0775 -o github-runner -g github-runner /opt/actions/_tool
+  install -d -m 0775 -o github-runner -g github-runner /opt/actions/_temp
+
+  # Basic sanity: warn if mount is noexec which can break Node binaries
+  if mount | grep -qE "/opt/actions.*noexec"; then
+    log "WARNING: /opt/actions is mounted with 'noexec'. This may break tool installs."
+  fi
+}
+
 latest_runner_url() {
   # Latest Linux x64 runner archive URL
   local api="https://api.github.com/repos/actions/runner/releases/latest"
@@ -247,4 +262,11 @@ latest_runner_url() {
 
 mask_token() {
   sed -E 's/("registration_token":\s*")[^"]+/\1********/g'
+}
+
+# Remove Later
+toolcache_doctor() {
+  log "Toolcache: $RUNNER_TOOL_CACHE | Temp: $RUNNER_TEMP"
+  test -w /opt/actions/_tool || die "/opt/actions/_tool not writable"
+  test -w /opt/actions/_temp || die "/opt/actions/_temp not writable"
 }
