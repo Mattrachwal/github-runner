@@ -151,8 +151,6 @@ EOF
 Environment=HOME=/var/lib/github-runner/%i
 Environment=USER=github-runner
 Environment=LOGNAME=github-runner
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
 
 # Clear base ExecStart and replace without -l flag
 ExecStart=
