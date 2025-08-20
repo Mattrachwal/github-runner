@@ -266,7 +266,22 @@ mask_token() {
 
 # Remove Later
 toolcache_doctor() {
-  log "Toolcache: $RUNNER_TOOL_CACHE | Temp: $RUNNER_TEMP"
-  test -w /opt/actions/_tool || die "/opt/actions/_tool not writable"
-  test -w /opt/actions/_temp || die "/opt/actions/_temp not writable"
+  # Fall back to our standard paths if the env vars aren’t present
+  local tc="${RUNNER_TOOL_CACHE:-/opt/actions/_tool}"
+  local tt="${RUNNER_TEMP:-/opt/actions/_temp}"
+
+  log "Toolcache: $tc | Temp: $tt"
+
+  # Existence + writability checks
+  [[ -d "$tc" ]] || die "$tc does not exist"
+  [[ -d "$tt" ]] || die "$tt does not exist"
+  [[ -w "$tc" ]] || die "$tc not writable"
+  [[ -w "$tt" ]] || die "$tt not writable"
+
+  # Nice-to-have diagnostics
+  mount | grep -E "(/opt/actions|_work|_tool|_temp)" || true
+  df -h "$tc" "$tt" || true
+  if mount | grep -qE "/opt/actions.*\bnoexec\b"; then
+    log "WARNING: /opt/actions is mounted with 'noexec' — setup-node may fail."
+  fi
 }
