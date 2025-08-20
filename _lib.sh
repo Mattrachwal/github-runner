@@ -124,47 +124,42 @@ UNIT
 }
 
 write_home_override_isolated() {
-  # Install the override from config file or create one
   install -d -m 0755 /etc/systemd/system/github-runner@.service.d
-  
-  # Always create a proper override with all necessary environment variables
+
   cat > /etc/systemd/system/github-runner@.service.d/override.conf <<'EOF'
 [Service]
-# Set per-instance HOME environment
+# Per-instance HOME and identity
 Environment=HOME=/var/lib/github-runner/%i
 Environment=USER=github-runner
 Environment=LOGNAME=github-runner
 
-# CRITICAL: Actions tool cache and temp directories
-# These are required for setup-* actions to work properly
-Environment=RUNNER_TOOL_CACHE=/opt/actions/_tool
-Environment=RUNNER_TEMP=/var/lib/github-runner/%i/_temp
-Environment=AGENT_TOOLSDIRECTORY=/opt/actions/_tool
+# XDG to keep writes inside per-instance HOME
+Environment=XDG_CONFIG_HOME=%h/.config
+Environment=XDG_CACHE_HOME=%h/.cache
+Environment=XDG_DATA_HOME=%h/.local/share
 
-# Working directory
+# Shared toolcache/temp for all instances on this host
+Environment=RUNNER_TOOL_CACHE=/opt/actions/_tool
+Environment=AGENT_TOOLSDIRECTORY=/opt/actions/_tool
+Environment=RUNNER_TEMP=/var/lib/github-runner/%i/_temp
+
+# Runner install dir per instance
 WorkingDirectory=/opt/actions-runner/%i
 
-# Prevent git config conflicts
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
+# Allow writes where we actually need them (future-proofing with ProtectSystem=full)
+ReadWritePaths=/var/lib/github-runner /opt/actions-runner /opt/actions/_tool /opt/actions/_temp
 
-# CRITICAL FIX: Clear and replace ExecStart to remove -l flag
-# The -l flag causes login shell behavior which can override our environment
+# Ensure we don't spawn a login shell (it can override HOME)
 ExecStart=
 ExecStart=/bin/bash -c 'cd /opt/actions-runner/%i && exec ./run.sh --startuptype service'
 
-# Timeouts to prevent hanging
+# Timeouts
 TimeoutStartSec=300
 TimeoutStopSec=60
-
-# Optional resource limits (uncomment if needed)
-# MemoryMax=4G
-# CPUQuota=80%
-# TasksMax=1000
 EOF
-  
+
   systemctl daemon-reload
-  log "Installed per-instance HOME drop-in (override.conf) with proper environment."
+  log "Installed per-instance HOME drop-in (override.conf) with safe write paths."
 }
 
 ensure_instance_home_envs() {
@@ -222,8 +217,7 @@ export LOGNAME="github-runner"
 export XDG_CONFIG_HOME="$homedir/.config"
 export XDG_DATA_HOME="$homedir/.local/share"
 export XDG_CACHE_HOME="$homedir/.cache"
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_SYSTEM=/dev/null
+
 
 # Add common paths
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

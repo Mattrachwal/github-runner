@@ -80,9 +80,6 @@ Environment=AGENT_TOOLSDIRECTORY=/opt/actions/_tool
 # Set working directory to the runner installation
 WorkingDirectory=/opt/actions-runner/%i
 
-# Prevent git config conflicts
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
 
 # CRITICAL: Clear the base ExecStart and replace without -l flag
 ExecStart=

@@ -54,11 +54,6 @@ Environment=LOGNAME=github-runner
 # Set working directory to the runner installation, not the HOME
 WorkingDirectory=/opt/actions-runner/%i
 
-# Baseline protections
-ProtectHome=yes
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
-
 # CRITICAL: Clear the base ExecStart and replace without -l flag
 # The -l flag causes login shell behavior which can override our environment
 ExecStart=

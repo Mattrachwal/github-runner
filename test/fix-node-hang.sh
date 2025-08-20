@@ -61,10 +61,6 @@ WorkingDirectory=/opt/actions-runner/%i
 Environment=RUNNER_TOOL_CACHE=/opt/actions/_tool
 Environment=RUNNER_TEMP=/opt/actions/_temp
 
-# Git configuration to prevent conflicts
-Environment=GIT_CONFIG_GLOBAL=/dev/null
-Environment=GIT_CONFIG_SYSTEM=/dev/null
-
 # Timeout settings to prevent hanging
 TimeoutStartSec=300
 TimeoutStopSec=60
