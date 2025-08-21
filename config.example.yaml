@@ -1,40 +1,130 @@
-# GitHub Runner Configuration
+# Enhanced GitHub Runner Configuration
+# Copy this file to config.yml and customize for your environment
+
+# GitHub Configuration
 github:
   # Your GitHub organization or username
   org: "your-org-name"
   # Personal Access Token with repo and admin:org scopes
+  # Get from: https://github.com/settings/tokens
   token: "ghp_your_token_here"
-  # Runner labels (comma-separated)
-  labels: "self-hosted,linux,x64,docker"
 
 # System Configuration
 system:
-  # Username for the runner service
+  # Username for the runner service (will be created if doesn't exist)
   runner_user: "github-runner"
-  # Number of concurrent runners
-  runner_count: 2
-  # Runner name prefix
-  runner_prefix: "ephemeral-runner"
-  # Docker network name
+  # Docker network name for runner isolation
   docker_network: "runner-network"
 
 # Security Configuration
 security:
-  # Enable firewall rules
+  # Enable UFW firewall rules
   enable_firewall: true
-  # Allowed SSH IPs (comma-separated, empty for all)
+  # Allowed SSH source IPs (comma-separated, leave empty for all)
   ssh_allowed_ips: ""
   # Enable automatic security updates
   auto_updates: true
-  # Runner timeout in minutes (auto-cleanup)
-  runner_timeout: 60
 
-# Docker Configuration
-docker:
-  # Docker registry (optional)
-  registry: ""
-  registry_user: ""
-  registry_password: ""
-  # Resource limits per runner
-  memory_limit: "4g"
-  cpu_limit: "2"
+# Runner Configurations
+# Define multiple runner types with different specifications
+runners:
+  # Lightweight runners for testing and PR checks
+  - name: "mini1-shared"
+    scope_type: "org" # org, repo, or enterprise
+    scope_url: "https://github.com/your-org"
+    labels: ["self-hosted", "linux", "x64", "mini-pc", "testing"]
+    instances: 5
+    resources:
+      memory_limit: "2g"
+      cpu_limit: "1.5"
+      disk_limit: "10g"
+    environment:
+      NODE_VERSION: "18"
+      PYTHON_VERSION: "3.11"
+    ephemeral: true # Auto-cleanup after job completion
+    timeout_minutes: 60 # Auto-timeout after 60 minutes
+    work_dir: "/var/lib/github-runner/mini1-shared"
+
+  # High-performance runners for builds and deployments
+  - name: "high-performance"
+    scope_type: "org"
+    scope_url: "https://github.com/your-org"
+    labels:
+      ["self-hosted", "linux", "x64", "high-performance", "build", "deploy"]
+    instances: 2
+    resources:
+      memory_limit: "8g"
+      cpu_limit: "4"
+      disk_limit: "50g"
+    environment:
+      NODE_VERSION: "18"
+      PYTHON_VERSION: "3.11"
+      DOCKER_BUILDKIT: "1"
+    ephemeral: true
+    timeout_minutes: 120 # Longer timeout for complex builds
+    work_dir: "/var/lib/github-runner/high-performance"
+
+  # Repository-specific dedicated runner
+  - name: "repo-special"
+    scope_type: "repo"
+    scope_url: "https://github.com/your-org/specific-repo"
+    labels: ["self-hosted", "linux", "special", "dedicated"]
+    instances: 1
+    resources:
+      memory_limit: "4g"
+      cpu_limit: "2"
+      disk_limit: "20g"
+    environment:
+      SPECIAL_CONFIG: "enabled"
+      CUSTOM_PATH: "/opt/special-tools"
+    ephemeral: false # Persistent runner
+    timeout_minutes: 0 # No timeout
+    work_dir: "/var/lib/github-runner/repo-special"
+
+  # Lightweight runners for quick jobs
+  - name: "lightweight"
+    scope_type: "org"
+    scope_url: "https://github.com/your-org"
+    labels: ["self-hosted", "linux", "x64", "lightweight", "quick"]
+    instances: 3
+    resources:
+      memory_limit: "1g"
+      cpu_limit: "0.5"
+      disk_limit: "5g"
+    environment:
+      NODE_VERSION: "18"
+    ephemeral: true
+    timeout_minutes: 30 # Quick timeout for fast jobs
+    work_dir: "/var/lib/github-runner/lightweight"
+
+  # GPU-enabled runners for machine learning workloads
+  - name: "gpu-ml"
+    scope_type: "org"
+    scope_url: "https://github.com/your-org"
+    labels: ["self-hosted", "linux", "x64", "gpu", "machine-learning", "cuda"]
+    instances: 1
+    resources:
+      memory_limit: "16g"
+      cpu_limit: "8"
+      disk_limit: "100g"
+    environment:
+      CUDA_VERSION: "11.8"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      PYTHON_VERSION: "3.11"
+      TORCH_VERSION: "2.0"
+    ephemeral: true
+    timeout_minutes: 240 # Extended timeout for ML training
+    work_dir: "/var/lib/github-runner/gpu-ml"
+
+  # Windows-compatible runners (if running on Windows host)
+  # - name: "windows-build"
+  #   scope_type: "org"
+  #   scope_url: "https://github.com/your-org"
+  #   labels: ["self-hosted", "windows", "x64", "vs2022"]
+  #   instances: 1
+  #   resources:
+  #     memory_limit: "8g"
+  #     cpu_limit: "4"
+  #     disk_limit: "50g"
+  #   environment:
+  #     DOTNET_
