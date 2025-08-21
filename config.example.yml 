@@ -1,0 +1,40 @@
+# GitHub Runner Configuration
+github:
+  # Your GitHub organization or username
+  org: "your-org-name"
+  # Personal Access Token with repo and admin:org scopes
+  token: "ghp_your_token_here"
+  # Runner labels (comma-separated)
+  labels: "self-hosted,linux,x64,docker"
+
+# System Configuration
+system:
+  # Username for the runner service
+  runner_user: "github-runner"
+  # Number of concurrent runners
+  runner_count: 2
+  # Runner name prefix
+  runner_prefix: "ephemeral-runner"
+  # Docker network name
+  docker_network: "runner-network"
+
+# Security Configuration
+security:
+  # Enable firewall rules
+  enable_firewall: true
+  # Allowed SSH IPs (comma-separated, empty for all)
+  ssh_allowed_ips: ""
+  # Enable automatic security updates
+  auto_updates: true
+  # Runner timeout in minutes (auto-cleanup)
+  runner_timeout: 60
+
+# Docker Configuration
+docker:
+  # Docker registry (optional)
+  registry: ""
+  registry_user: ""
+  registry_password: ""
+  # Resource limits per runner
+  memory_limit: "4g"
+  cpu_limit: "2"
